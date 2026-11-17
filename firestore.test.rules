@@ -1,0 +1,11 @@
+rules_version = '2';
+// DEVELOPMENT ONLY: any signed-in (including anonymous) user can read/write everything.
+// Needed for "Debug login" mode, where uids are not tied to Firebase Auth.
+// Anyone can then claim @tomatik_dev, so never ship with these rules.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

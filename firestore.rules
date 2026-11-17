@@ -1,0 +1,69 @@
+rules_version = '2';
+// PRODUCTION rules. Use these once real OTP login (Cloud Functions) is deployed and the
+// app's "Debug login" switch is OFF: the Cloud Function signs users in with uid = sha256(email)[0..28],
+// so request.auth.uid is trustworthy here.
+//
+// In debug (mock) mode the app signs in anonymously, so the uid does NOT match the profile
+// id and these rules would block writes. For quick testing deploy firestore.test.rules instead.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // >>> Put the e-mail address that owns the Super Admin account here <<<
+    function adminEmail() { return 'CHANGE_ME@example.com'; }
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function myProfile() { return get(/databases/$(database)/documents/users/$(me())).data; }
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(me()))
+        && myProfile().username.lower() == 'tomatik_dev'
+        && request.auth.token.email == adminEmail();
+    }
+    function unchanged(field) { return request.resource.data[field] == resource.data[field]; }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      // create: own profile only, badges forced off
+      allow create: if signedIn() && me() == uid
+        && request.resource.data.verified == false
+        && request.resource.data.support == false
+        && (request.resource.data.username.lower() != 'tomatik_dev'
+            || request.auth.token.email == adminEmail());
+      // update: owner can change name/avatar only; admin can change badges
+      allow update: if signedIn() && (
+        (me() == uid && unchanged('verified') && unchanged('support') && unchanged('username'))
+        || isAdmin());
+      allow delete: if false;
+    }
+
+    match /usernames/{name} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.uid == me();
+      allow update, delete: if false;
+    }
+
+    match /chats/{chatId} {
+      allow read: if signedIn();   // lets Discover list public channels; members-only privacy is client-side
+      allow create: if signedIn() && me() in request.resource.data.members;
+      allow update: if signedIn() && (
+        me() in resource.data.members                                   // members: messages, last message
+        || (resource.data.type != 'DIRECT' && resource.data.discoverable == true) // anyone: join public channels
+        || me() in request.resource.data.members                         // leave/join self
+        || isAdmin());
+      allow delete: if signedIn() && (resource.data.ownerId == me() || isAdmin());
+
+      match /messages/{msgId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.senderId == me()
+          && me() in get(/databases/$(database)/documents/chats/$(chatId)).data.members;
+        allow update: if signedIn(); // read receipts (readBy)
+        allow delete: if signedIn() && (
+          resource.data.senderId == me()
+          || get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == me()
+          || isAdmin());
+      }
+    }
+  }
+}
