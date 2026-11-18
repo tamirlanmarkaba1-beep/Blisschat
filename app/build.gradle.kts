@@ -78,15 +78,12 @@ val downloadNunito by tasks.registering {
         )
         for (u in urls) {
             try {
-                val connection = java.net.URL(u).openConnection()
-                connection.getInputStream().use { input ->
-                    target.outputStream().use { out ->
-                        input.copyTo(out)
-                    }
+                val bytes = java.net.URI(u).toURL().readBytes()
+                if (bytes.size > 50_000) {
+                    target.writeBytes(bytes)
+                    break
                 }
-                if (target.length() > 50_000) break else target.delete()
             } catch (e: Exception) {
-                target.delete()
                 logger.warn("Nunito download failed from $u: ${e.message}")
             }
         }
