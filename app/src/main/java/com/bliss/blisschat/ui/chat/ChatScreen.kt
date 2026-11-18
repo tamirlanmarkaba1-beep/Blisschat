@@ -195,7 +195,7 @@ fun ChatScreen(container: AppContainer, chatId: String, onBack: () -> Unit, onOp
         BlissHeader {
             Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
-                Row(Modifier.weight(1f).bounceClick(enabled = chat != null, onClick = openHeader), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).Row(Modifier.weight(1f).bounceClick(enabled = chat != null, onClick = { openHeader(); Unit }), verticalAlignment = Alignment.CenterVertically) {
                     Avatar(other?.avatarUrl.orEmpty(), title.ifBlank { "?" }, size = 44.dp)
                     Spacer(Modifier.width(10.dp))
                     Column {
