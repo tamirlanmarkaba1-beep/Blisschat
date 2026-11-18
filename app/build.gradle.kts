@@ -78,7 +78,7 @@ val downloadNunito by tasks.registering {
         )
         for (u in urls) {
             try {
-                java.net.URL(u).openStream().use { input ->
+                java.net.URL(u).openStream().use { input java.io.InputStream ->
                     target.outputStream().use { out -> input.copyTo(out) }
                 }
                 if (target.length() > 50_000) break else target.delete()
