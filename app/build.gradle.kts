@@ -16,8 +16,6 @@ android {
         versionName = "2.0.0"
     }
 
-    // Fixed key committed to the repo so the SHA-1 stays the same on every machine / CI run
-    // (Google Sign-In is bound to the SHA-1). Replace with your own keystore for a public release.
     signingConfigs {
         create("blisschat") {
             storeFile = file("blisschat.keystore")
@@ -51,48 +49,6 @@ android {
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     }
-
-    sourceSets {
-        getByName("main") {
-            // Nunito is downloaded here at build time (see downloadNunito below)
-            assets.srcDir(layout.buildDirectory.dir("generated/nunito"))
-        }
-    }
-}
-
-/**
- * Downloads the Nunito variable font (SIL Open Font License) once, unless you already placed
- * your own copy at app/src/main/assets/fonts/Nunito.ttf. If the download fails the build still
- * succeeds and the app falls back to the system font.
- */
-val downloadNunito by tasks.registering {
-    val target = layout.buildDirectory.file("generated/nunito/fonts/Nunito.ttf").get().asFile
-    val manual = file("src/main/assets/fonts/Nunito.ttf")
-    outputs.file(target)
-    doLast {
-        if (manual.exists() || target.exists()) return@doLast
-        target.parentFile.mkdirs()
-        val urls = listOf(
-            "https://github.com/google/fonts/raw/main/ofl/nunito/Nunito%5Bwght%5D.ttf",
-            "https://raw.githubusercontent.com/google/fonts/main/ofl/nunito/Nunito%5Bwght%5D.ttf"
-        )
-        for (u in urls) {
-            try {
-                val bytes = java.net.URI(u).toURL().readBytes()
-                if (bytes.size > 50_000) {
-                    target.writeBytes(bytes)
-                    break
-                }
-            } catch (e: Exception) {
-                logger.warn("Nunito download failed from $u: ${e.message}")
-            }
-        }
-        if (!target.exists()) logger.warn("Nunito not downloaded - the app will use the system font.")
-    }
-}
-
-tasks.configureEach {
-    if (name.startsWith("merge") && name.endsWith("Assets")) dependsOn(downloadNunito)
 }
 
 dependencies {
@@ -123,11 +79,9 @@ dependencies {
     implementation("com.google.firebase:firebase-storage")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
-    // Google Sign-In through Credential Manager
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
-    // WebRTC (prebuilt libwebrtc) for audio / video calls
     implementation("io.getstream:stream-webrtc-android:1.1.1")
 }
