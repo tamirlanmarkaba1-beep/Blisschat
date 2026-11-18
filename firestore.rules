@@ -1,69 +1,118 @@
 rules_version = '2';
-// PRODUCTION rules. Use these once real OTP login (Cloud Functions) is deployed and the
-// app's "Debug login" switch is OFF: the Cloud Function signs users in with uid = sha256(email)[0..28],
-// so request.auth.uid is trustworthy here.
-//
-// In debug (mock) mode the app signs in anonymously, so the uid does NOT match the profile
-// id and these rules would block writes. For quick testing deploy firestore.test.rules instead.
+// blisschat v2 — production rules.
+// Messages, media keys and call signalling are END-TO-END ENCRYPTED on the client; these rules only
+// control WHO may store/read the (opaque) documents and protect plaintext metadata (badges, membership).
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // >>> Put the e-mail address that owns the Super Admin account here <<<
+    // >>> Put the e-mail address that owns the Super Admin account (@tomatik_dev) here <<<
     function adminEmail() { return 'CHANGE_ME@example.com'; }
 
     function signedIn() { return request.auth != null; }
     function me() { return request.auth.uid; }
-    function myProfile() { return get(/databases/$(database)/documents/users/$(me())).data; }
+    function doc(path) { return get(/databases/$(database)/documents/$(path)); }
     function isAdmin() {
       return signedIn()
-        && exists(/databases/$(database)/documents/users/$(me()))
-        && myProfile().username.lower() == 'tomatik_dev'
-        && request.auth.token.email == adminEmail();
+        && request.auth.token.email == adminEmail()
+        && request.auth.token.email_verified == true;
     }
-    function unchanged(field) { return request.resource.data[field] == resource.data[field]; }
+    function changed(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
 
+    /* ------------------------------------------------------------- users */
     match /users/{uid} {
       allow read: if signedIn();
-      // create: own profile only, badges forced off
-      allow create: if signedIn() && me() == uid
-        && request.resource.data.verified == false
-        && request.resource.data.support == false
-        && (request.resource.data.username.lower() != 'tomatik_dev'
-            || request.auth.token.email == adminEmail());
-      // update: owner can change name/avatar only; admin can change badges
-      allow update: if signedIn() && (
-        (me() == uid && unchanged('verified') && unchanged('support') && unchanged('username'))
-        || isAdmin());
+      allow create: if me() == uid
+        && request.resource.data.verified == false && request.resource.data.support == false
+        && request.resource.data.username is string
+        && exists(/databases/$(database)/documents/usernames/$(request.resource.data.username))
+        && get(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == uid;
+      allow update: if (me() == uid && changed(['displayName', 'bio', 'avatarUrl', 'lastSeen', 'publicKey', 'kid']))
+        || (isAdmin() && changed(['verified', 'support']));
       allow delete: if false;
+
+      // Public-key history (so old messages stay readable after a key change). Never overwritten.
+      match /keys/{kid} {
+        allow read: if signedIn();
+        allow create: if me() == uid;
+        allow update: if me() == uid && request.resource.data == resource.data;
+        allow delete: if false;
+      }
     }
 
+    /* ---------------------------------------------------------- usernames */
+    // `get` is public on purpose: it lets "log in with username" find the e-mail before sign-in.
     match /usernames/{name} {
-      allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.uid == me();
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.uid == me()
+        && name == name.lower()
+        && (name != 'tomatik_dev' || (request.auth.token.email == adminEmail() && request.auth.token.email_verified == true));
       allow update, delete: if false;
     }
 
+    /* -------------------------------------------------------------- chats */
     match /chats/{chatId} {
-      allow read: if signedIn();   // lets Discover list public channels; members-only privacy is client-side
-      allow create: if signedIn() && me() in request.resource.data.members;
-      allow update: if signedIn() && (
-        me() in resource.data.members                                   // members: messages, last message
-        || (resource.data.type != 'DIRECT' && resource.data.discoverable == true) // anyone: join public channels
-        || me() in request.resource.data.members                         // leave/join self
-        || isAdmin());
-      allow delete: if signedIn() && (resource.data.ownerId == me() || isAdmin());
+      function isMember() { return signedIn() && me() in resource.data.members; }
+      function isMemberAfter() { return signedIn() && me() in request.resource.data.members; }
+
+      allow read: if isMember() || isAdmin();
+      allow create: if isMemberAfter()
+        && request.resource.data.ownerId == me()
+        && request.resource.data.verified == false
+        && (request.resource.data.type == 'GROUP'
+            || (request.resource.data.type == 'DIRECT' && request.resource.data.members.size() == 2));
+      allow update: if (isMember() && changed(['lastEnv', 'lastMsgId', 'lastSenderId', 'lastAt', 'readers', 'members'])
+          && (!('members' in request.resource.data.diff(resource.data).affectedKeys())
+              || (resource.data.type == 'GROUP'
+                  && (request.resource.data.members.hasAll(resource.data.members)           // add members
+                      || request.resource.data.members.toSet() == resource.data.members.toSet().difference([me()].toSet())))))   // leave
+        || (isAdmin() && changed(['verified']));
+      allow delete: if signedIn() && ((isMember() && resource.data.ownerId == me()) || isAdmin());
+
+      // Wrapped group keys: only the recipient (or owner/admin for cleanup) can read them.
+      match /keys/{uid} {
+        allow read: if signedIn() && (me() == uid || isAdmin());
+        allow create: if signedIn()
+          && me() in getAfter(/databases/$(database)/documents/chats/$(chatId)).data.members
+          && uid in getAfter(/databases/$(database)/documents/chats/$(chatId)).data.members;
+        allow update: if false;
+        allow delete: if signedIn() && (doc('chats/' + chatId).data.ownerId == me() || isAdmin());
+      }
 
       match /messages/{msgId} {
-        allow read: if signedIn();
-        allow create: if signedIn()
-          && request.resource.data.senderId == me()
-          && me() in get(/databases/$(database)/documents/chats/$(chatId)).data.members;
-        allow update: if signedIn(); // read receipts (readBy)
-        allow delete: if signedIn() && (
-          resource.data.senderId == me()
-          || get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == me()
-          || isAdmin());
+        function chat() { return doc('chats/' + chatId).data; }
+        allow read: if signedIn() && me() in chat().members;
+        allow create: if signedIn() && me() in chat().members
+          && request.resource.data.senderId == me() && request.resource.data.deleted == false;
+        allow update: if signedIn() && me() in chat().members
+          && (changed(['readBy', 'reactions'])
+              || (resource.data.senderId == me() && request.resource.data.deleted == true && changed(['deleted', 'ct', 'a', 'b', 'reactions'])));
+        allow delete: if signedIn() && (chat().ownerId == me() || isAdmin());
       }
+    }
+
+    /* -------------------------------------------------------------- calls */
+    match /calls/{callId} {
+      allow read: if signedIn() && (me() == resource.data.callerId || me() == resource.data.calleeId);
+      // incoming-call listener: query by calleeId == me
+      allow create: if signedIn() && request.resource.data.callerId == me() && request.resource.data.status == 'ringing';
+      allow update: if signedIn() && (me() == resource.data.callerId || me() == resource.data.calleeId)
+        && changed(['status', 'answer']);
+      allow delete: if false;
+
+      match /cands/{candId} {
+        function call() { return doc('calls/' + callId).data; }
+        allow read: if signedIn() && (me() == call().callerId || me() == call().calleeId);
+        allow create: if signedIn() && request.resource.data.from == me() && (me() == call().callerId || me() == call().calleeId);
+        allow update, delete: if false;
+      }
+    }
+
+    /* ------------------------------------------------------------ reports */
+    match /reports/{id} {
+      allow create: if signedIn() && request.resource.data.by == me();
+      allow read, update, delete: if false;
     }
   }
 }

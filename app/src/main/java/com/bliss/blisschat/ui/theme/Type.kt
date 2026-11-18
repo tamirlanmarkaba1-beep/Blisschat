@@ -10,10 +10,9 @@ import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 
 /**
- * Nunito (Regular 400 / Medium 500 / SemiBold 600 / Bold 700) from ONE variable font file at
- * assets/fonts/Nunito.ttf. The Gradle task `downloadNunito` fetches it automatically at build
- * time; you can also drop your own copy at app/src/main/assets/fonts/Nunito.ttf.
- * If the file is missing the app quietly falls back to the system font.
+ * Nunito (400 / 500 / 600 / 700) from ONE variable font file at assets/fonts/Nunito.ttf.
+ * The Gradle task `downloadNunito` fetches it at build time; or drop your own copy at
+ * app/src/main/assets/fonts/Nunito.ttf. If missing, the system font is used.
  */
 object NunitoFamily {
     private const val PATH = "fonts/Nunito.ttf"
@@ -21,17 +20,12 @@ object NunitoFamily {
     @OptIn(ExperimentalTextApi::class)
     fun load(context: Context): FontFamily = try {
         context.assets.open(PATH).close()
-        FontFamily(
-            listOf(400, 500, 600, 700, 800).map { w ->
-                Font(
-                    path = PATH,
-                    assetManager = context.assets,
-                    weight = FontWeight(w),
-                    style = FontStyle.Normal,
-                    variationSettings = FontVariation.Settings(FontVariation.weight(w))
-                )
-            }
-        )
+        FontFamily(listOf(400, 500, 600, 700, 800).map { w ->
+            Font(
+                path = PATH, assetManager = context.assets, weight = FontWeight(w), style = FontStyle.Normal,
+                variationSettings = FontVariation.Settings(FontVariation.weight(w))
+            )
+        })
     } catch (e: Exception) {
         FontFamily.Default
     }

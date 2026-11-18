@@ -1,13 +1,23 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Avatars: anyone signed in can view; images up to 2 MB.
-    // (In real OTP mode you can tighten the write rule to: request.auth.uid == uid)
+    // Profile pictures: readable by signed-in users, writable only by the owner.
     match /avatars/{file} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
+        && file == request.auth.uid + '.jpg'
         && request.resource.size < 2 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+    }
+
+    // Encrypted media: objects are AES-GCM ciphertext (random bytes); the key travels inside E2EE messages.
+    // Only chat members may touch them.
+    match /media/{chatId}/{file} {
+      function members() { return firestore.get(/databases/(default)/documents/chats/$(chatId)).data.members; }
+      allow read: if request.auth != null && request.auth.uid in members();
+      allow create: if request.auth != null && request.auth.uid in members() && request.resource.size < 16 * 1024 * 1024;
+      allow delete: if request.auth != null && request.auth.uid in members();
+      allow update: if false;
     }
   }
 }

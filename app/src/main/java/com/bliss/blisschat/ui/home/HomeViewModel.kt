@@ -18,97 +18,90 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-enum class ChatFilter(val label: String) {
-    ALL("All"), DIRECT("Direct"), GROUPS("Groups"), CHANNELS("Channels"), DISCOVER("Discover")
-}
+enum class ChatFilter(val label: String) { GROUPS("группы"), UNREAD("непрочитано"), CONTACTS("контакты") }
 
-data class HomeState(
-    val me: UserProfile? = null,
-    val items: List<ChatItem> = emptyList(),
-    val loading: Boolean = true
-)
+data class HomeState(val me: UserProfile? = null, val items: List<ChatItem> = emptyList(), val loading: Boolean = true)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModel(private val c: AppContainer) : ViewModel() {
 
     val query = MutableStateFlow("")
-    val filter = MutableStateFlow(ChatFilter.ALL)
+    /** null = show everything */
+    val filter = MutableStateFlow<ChatFilter?>(null)
 
-    private val me: StateFlow<UserProfile?> = c.session
-        .map { (it as? Session.Ready)?.user }
+    private val me: StateFlow<UserProfile?> = c.session.map { (it as? Session.Ready)?.user }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
     private val uid = me.map { it?.uid }.filterNotNull().distinctUntilChanged()
 
-    private val myChats = uid.flatMapLatest { c.repo.observeMyChats(it) }
-        .catch { emit(emptyList()) }
-    private val discover = c.repo.observePublicChannels().catch { emit(emptyList()) }
+    private val myChats = uid.flatMapLatest { c.repo.observeMyChats(it) }.catch { emit(emptyList()) }
 
-    /** Profiles of the people we have direct chats with (name / avatar / badges for the row). */
-    private val peers = myChats
+    /** Profiles needed for the list: the other person of each direct chat + last senders of groups. */
+    private val people = myChats
         .map { chats ->
             val mine = me.value?.uid
-            chats.filter { it.type == ChatType.DIRECT }
-                .flatMap { it.members }.filter { it != mine }.toSet()
+            chats.flatMap { ch -> if (ch.type == ChatType.DIRECT) ch.members.filter { it != mine } else listOf(ch.lastSenderId) }
+                .filter { it.isNotBlank() }.toSet()
         }
         .distinctUntilChanged()
         .flatMapLatest { c.repo.observeUsers(it) }
         .catch { emit(emptyMap()) }
 
-    private data class Data(val mine: List<Chat>, val pub: List<Chat>, val peers: Map<String, UserProfile>)
+    private val previews = HashMap<String, String>()
 
-    private val data = combine(myChats, discover, peers) { m, p, u -> Data(m, p, u) }
-
-    val state: StateFlow<HomeState> = combine(data, query, filter, me) { d, q, f, user ->
-        val myId = user?.uid.orEmpty()
-        val joinedIds = d.mine.map { it.id }.toSet()
-
-        fun toItem(chat: Chat, joined: Boolean): ChatItem {
-            if (chat.type == ChatType.DIRECT) {
-                val other = d.peers[chat.members.firstOrNull { it != myId }]
-                return ChatItem(
-                    chat = chat,
-                    title = other?.displayName?.ifBlank { other.username } ?: "Direct chat",
-                    avatarUrl = other?.avatarUrl.orEmpty(),
-                    verified = other?.verified == true,
-                    support = other?.support == true,
-                    subtitle = chat.lastMessage.ifBlank { other?.let { "@${it.username}" }.orEmpty() },
-                    time = chat.lastMessageAt,
-                    joined = true
-                )
+    private suspend fun previewOf(chat: Chat, myId: String, people: Map<String, UserProfile>): String {
+        val env = chat.lastEnv
+        if (env == null) {
+            return when {
+                chat.lastMsgId.isNotEmpty() -> "Сообщение удалено"
+                chat.type == ChatType.DIRECT -> "Напишите первое сообщение"
+                else -> "Группа создана"
             }
-            return ChatItem(
-                chat = chat,
-                title = chat.name,
-                avatarUrl = "",
-                verified = false,
-                support = false,
-                subtitle = if (joined) chat.lastMessage
-                else chat.description.ifBlank { "${chat.members.size} members" },
-                time = chat.lastMessageAt,
-                joined = joined
-            )
         }
+        val key = "${chat.id}:${chat.lastMsgId}:${env.ct.length}"
+        val text = previews.getOrPut(key) {
+            runCatching { c.e2ee.decrypt(chat, myId, chat.lastSenderId, env).preview }.getOrDefault("🔒 Зашифрованное сообщение")
+        }
+        return if (chat.type == ChatType.GROUP) {
+            val who = if (chat.lastSenderId == myId) "Вы" else people[chat.lastSenderId]?.title.orEmpty()
+            if (who.isEmpty()) text else "$who: $text"
+        } else text
+    }
 
-        val base: List<ChatItem> = when (f) {
-            ChatFilter.ALL -> d.mine.map { toItem(it, true) }
-            ChatFilter.DIRECT -> d.mine.filter { it.type == ChatType.DIRECT }.map { toItem(it, true) }
-            ChatFilter.GROUPS -> d.mine.filter { it.type == ChatType.GROUP }.map { toItem(it, true) }
-            ChatFilter.CHANNELS -> d.mine.filter { it.type == ChatType.CHANNEL }.map { toItem(it, true) }
-            ChatFilter.DISCOVER -> d.pub.filter { it.id !in joinedIds }.map { toItem(it, false) }
+    private data class Inputs(val chats: List<Chat>, val people: Map<String, UserProfile>, val q: String, val f: ChatFilter?, val me: UserProfile?)
+
+    val state: StateFlow<HomeState> = combine(myChats, people, query, filter, me) { ch, p, q, f, m -> Inputs(ch, p, q, f, m) }
+        .mapLatest { i ->
+            val myId = i.me?.uid.orEmpty()
+            val items = i.chats.map { chat ->
+                val preview = previewOf(chat, myId, i.people)
+                if (chat.type == ChatType.DIRECT) {
+                    val other = i.people[chat.members.firstOrNull { it != myId }]
+                    ChatItem(chat, other?.title ?: "Личный чат", other?.avatarUrl.orEmpty(), other?.verified == true,
+                        other?.support == true, preview, chat.lastAt, chat.unreadFor(myId))
+                } else {
+                    ChatItem(chat, chat.name, "", chat.verified, false, preview, chat.lastAt, chat.unreadFor(myId))
+                }
+            }
+            val byFilter = when (i.f) {
+                ChatFilter.GROUPS -> items.filter { it.chat.type == ChatType.GROUP }
+                ChatFilter.UNREAD -> items.filter { it.unread }
+                ChatFilter.CONTACTS -> items.filter { it.chat.type == ChatType.DIRECT }
+                null -> items
+            }
+            val needle = i.q.trim().lowercase()
+            val found = if (needle.isEmpty()) byFilter else byFilter.filter {
+                it.title.lowercase().contains(needle) || it.preview.lowercase().contains(needle)
+            }
+            HomeState(i.me, found.sortedByDescending { it.time }, false)
         }
-        val needle = q.trim().lowercase()
-        val filtered = if (needle.isEmpty()) base else base.filter {
-            it.title.lowercase().contains(needle) || it.subtitle.lowercase().contains(needle)
-        }
-        HomeState(me = user, items = filtered.sortedByDescending { it.time }, loading = false)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeState())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeState())
 
     fun setQuery(q: String) { query.value = q }
-    fun setFilter(f: ChatFilter) { filter.value = f }
+    fun toggleFilter(f: ChatFilter) { filter.value = if (filter.value == f) null else f }
 
     fun startDirect(username: String, onResult: (Result<String>) -> Unit) = viewModelScope.launch {
         val me = me.value ?: return@launch
@@ -119,16 +112,5 @@ class HomeViewModel(private val c: AppContainer) : ViewModel() {
         val me = me.value ?: return@launch
         val list = usernames.split(",", " ", "\n").map { it.trim() }.filter { it.isNotEmpty() }
         onResult(c.repo.createGroup(me.uid, name, list))
-    }
-
-    fun createChannel(name: String, description: String, discoverable: Boolean, onResult: (Result<String>) -> Unit) =
-        viewModelScope.launch {
-            val me = me.value ?: return@launch
-            onResult(c.repo.createChannel(me.uid, name, description, discoverable))
-        }
-
-    fun join(chatId: String, onDone: (Result<Unit>) -> Unit) = viewModelScope.launch {
-        val me = me.value ?: return@launch
-        onDone(c.repo.join(chatId, me.uid))
     }
 }

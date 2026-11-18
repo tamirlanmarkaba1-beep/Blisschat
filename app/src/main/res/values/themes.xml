@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="bliss_window_bg">#FF0B1110</color>
-    <color name="ic_launcher_background">#FF0B1110</color>
 
     <!-- Platform theme only: all real styling happens in Compose (Material 3) -->
     <style name="Theme.Blisschat" parent="@android:style/Theme.Material.NoActionBar">

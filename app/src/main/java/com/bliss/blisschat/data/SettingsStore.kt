@@ -4,62 +4,46 @@ import android.content.Context
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.bliss.blisschat.BuildConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "blisschat_prefs")
 
-/** Accent colours the user can pick. [hue] drives the generated Material 3 palette. */
-enum class Accent(val label: String, val hue: Float) {
-    TEAL("Turquoise", 174f),
-    EMERALD("Emerald", 148f),
-    VIOLET("Violet", 268f),
-    BLUE("Blue", 214f),
-    DYNAMIC("System", 0f)
-}
+const val DEFAULT_HUE = 174f // turquoise
 
 data class AppSettings(
     val dark: Boolean = true,
-    val accent: Accent = Accent.TEAL,
-    val mockAuth: Boolean = BuildConfig.MOCK_AUTH,
-    val sessionUid: String? = null,
-    val sessionEmail: String? = null
+    /** Accent colour as a hue on the full colour wheel (0..360). Drives the whole palette and background glow. */
+    val hue: Float = DEFAULT_HUE,
+    val rememberMe: Boolean = true,
+    /** "chatId/messageId" pairs the user deleted only on this device. */
+    val hidden: Set<String> = emptySet()
 )
 
 class SettingsStore(private val context: Context) {
 
     private object Keys {
         val DARK = booleanPreferencesKey("dark")
-        val ACCENT = stringPreferencesKey("accent")
-        val MOCK = booleanPreferencesKey("mock_auth")
-        val UID = stringPreferencesKey("session_uid")
-        val EMAIL = stringPreferencesKey("session_email")
+        val HUE = floatPreferencesKey("hue")
+        val REMEMBER = booleanPreferencesKey("remember_me")
+        val HIDDEN = stringSetPreferencesKey("hidden_messages")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p: Preferences ->
         AppSettings(
             dark = p[Keys.DARK] ?: true,
-            accent = runCatching { Accent.valueOf(p[Keys.ACCENT] ?: "TEAL") }.getOrDefault(Accent.TEAL),
-            mockAuth = p[Keys.MOCK] ?: BuildConfig.MOCK_AUTH,
-            sessionUid = p[Keys.UID],
-            sessionEmail = p[Keys.EMAIL]
+            hue = p[Keys.HUE] ?: DEFAULT_HUE,
+            rememberMe = p[Keys.REMEMBER] ?: true,
+            hidden = p[Keys.HIDDEN] ?: emptySet()
         )
     }
 
     suspend fun setDark(value: Boolean) = context.dataStore.edit { it[Keys.DARK] = value }
-    suspend fun setAccent(value: Accent) = context.dataStore.edit { it[Keys.ACCENT] = value.name }
-    suspend fun setMockAuth(value: Boolean) = context.dataStore.edit { it[Keys.MOCK] = value }
-
-    suspend fun setSession(uid: String, email: String) = context.dataStore.edit {
-        it[Keys.UID] = uid
-        it[Keys.EMAIL] = email
-    }
-
-    suspend fun clearSession() = context.dataStore.edit {
-        it.remove(Keys.UID)
-        it.remove(Keys.EMAIL)
-    }
+    suspend fun setHue(value: Float) = context.dataStore.edit { it[Keys.HUE] = value.coerceIn(0f, 360f) }
+    suspend fun setRememberMe(value: Boolean) = context.dataStore.edit { it[Keys.REMEMBER] = value }
+    suspend fun hide(chatId: String, messageId: String) =
+        context.dataStore.edit { it[Keys.HIDDEN] = (it[Keys.HIDDEN] ?: emptySet()) + "$chatId/$messageId" }
 }
