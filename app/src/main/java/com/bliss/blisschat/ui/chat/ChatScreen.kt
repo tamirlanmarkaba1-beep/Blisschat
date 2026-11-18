@@ -215,38 +215,40 @@ fun ChatScreen(container: AppContainer, chatId: String, onBack: () -> Unit, onOp
                     BlobButton(Icons.Filled.Call, "Звонок", { startCall(false) }, size = 46.dp,
                         container = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), content = MaterialTheme.colorScheme.onPrimary)
                 }
-                if (chat != null) Box {
-                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, "Меню") }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text(if (chat.type == ChatType.DIRECT) "Профиль" else "О группе") },
-                            leadingIcon = { Icon(Icons.Filled.Info, null) },
-                            onClick = { menuOpen = false; openHeader() }
-                        )
-                        if (s.isAdmin && s.isGroup) {
-                            DropdownMenuItem(
-                                text = { Text(if (chat.verified) "Снять галочку группы" else "Подтвердить группу") },
-                                leadingIcon = { Icon(Icons.Filled.Verified, null, tint = VerifiedBlue) },
-                                onClick = { menuOpen = false; vm.setGroupVerified(!chat.verified) }
-                            )
-                        }
-                        if (s.canLeave) {
-                            DropdownMenuItem(
-                                text = { Text("Выйти из группы") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, null) },
-                                onClick = { menuOpen = false; vm.leave(onBack) }
-                            )
-                        }
-                        if (s.canDeleteGroup) {
-                            DropdownMenuItem(
-                                text = { Text(if (s.isAdmin && !s.isOwner) "Удалить группу (админ)" else "Удалить группу", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = { Icon(Icons.Filled.DeleteSweep, null, tint = MaterialTheme.colorScheme.error) },
-                                onClick = { menuOpen = false; confirmDelete = true }
-                            )
-                        }
-                    }
-                }
-            }
+                    if (chat != null) Box {
+        IconButton(onClick = { menuExpanded = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = "Меню")
         }
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false }
+        ) {
+
+        DropdownMenuItem(
+            text = { Text(if (s.isMuted) "Включить звук" else "Выключить звук") },
+            leadingIcon = { Icon(Icons.Default.Notifications, null) },
+            onClick = { menuExpanded = false; vm.toggleMute() }
+        )
+        if (s.isAdmin && s.isGroup) {
+            DropdownMenuItem(
+                text = { Text("Настройки группы") },
+                leadingIcon = { Icon(Icons.Default.Settings, null) },
+                onClick = { menuExpanded = false; openSettings() }
+            )
+        }
+        if (s.canLeave) {
+            DropdownMenuItem(
+                text = { Text("Покинуть группу") },
+                onClick = { menuExpanded = false; vm.leaveGroup() }
+            )
+        }
+        if (s.canDeleteGroup) {
+            DropdownMenuItem(
+                text = { Text("Удалить группу") },
+                onClick = { menuExpanded = false; vm.deleteGroup() }
+            )
+        }
+    }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (chat == null && s.chatLoaded) {
