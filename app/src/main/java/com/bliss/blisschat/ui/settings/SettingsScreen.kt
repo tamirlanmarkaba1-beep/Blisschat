@@ -1,5 +1,3 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
-
 package com.bliss.blisschat.ui.settings
 
 import androidx.compose.foundation.background
