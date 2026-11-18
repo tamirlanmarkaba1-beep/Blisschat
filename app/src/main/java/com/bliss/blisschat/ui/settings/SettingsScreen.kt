@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.bliss.blisschat.ui.settings
 
 import androidx.compose.foundation.background
@@ -45,7 +47,7 @@ import com.bliss.blisschat.ui.components.OutlinedPillButton
 
 private fun hueColor(h: Float) = Color.hsv(h.coerceIn(0f, 359.9f), 0.78f, 0.95f)
 private val Rainbow = Brush.horizontalGradient((0..12).map { hueColor(it * 30f) })
-@OptIn(ExperimentalMaterial3Api::class)
+
 @Composable
 fun SettingsScreen(container: AppContainer, onOpenAdmin: () -> Unit) {
     val vm: SettingsViewModel = viewModel(factory = container.factory())
