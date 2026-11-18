@@ -533,7 +533,9 @@ private fun MessageActions(
                     }
                 }
             }
-            if (mine && !m.message.deleted) SheetAction("Удалить у всех", MaterialTheme.colorScheme.error, onDeleteAll)
+            if (mine && !m.message.deleted) {
+                SheetAction("Удалить у всех", MaterialTheme.colorScheme.error, onDeleteAll)
+            }
             SheetAction("Удалить у меня", if (mine) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error, onDeleteLocal)
         }
     }
