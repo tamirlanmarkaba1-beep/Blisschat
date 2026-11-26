@@ -66,14 +66,15 @@ private class Preset(val blurDp: Float, val saturation: Float, val refractHeight
 
 private val PRESETS = listOf(
     Preset(0f, 1f, 0f, 0f, false, 0.35f),
-    Preset(18f, 1.35f, 0f, 0f, false, 0.45f),
-    Preset(5f, 1.5f, 24f, 38f, false, 0.6f),
-    Preset(2.5f, 1.7f, 44f, 78f, true, 0.8f)
+    Preset(16f, 1.7f, 0f, 0f, false, 0.45f),
+    Preset(4f, 2.0f, 26f, 34f, false, 0.6f),
+    Preset(2f, 2.4f, 44f, 56f, true, 0.85f)
 )
 
 private const val LENS = """
 uniform shader content;
 uniform float2 size;
+uniform float2 off;
 uniform float corner;
 uniform float height;
 uniform float amount;
@@ -85,7 +86,7 @@ float sdf(float2 p) {
 }
 
 half4 main(float2 coord) {
-  float2 p = coord - size * 0.5;
+  float2 p = coord - off - size * 0.5;
   float d = -sdf(p);
   if (d >= height || d < 0.0) { return content.eval(coord); }
   float t = 1.0 - d / height;
@@ -93,11 +94,11 @@ half4 main(float2 coord) {
   float2 g = float2(sdf(p + float2(1.0, 0.0)) - sdf(p - float2(1.0, 0.0)),
                     sdf(p + float2(0.0, 1.0)) - sdf(p - float2(0.0, 1.0)));
   float2 n = g / max(length(g), 0.0001);
-  float2 hi = size - float2(1.0);
-  half4 col = content.eval(clamp(coord - n * amount * k, float2(0.0), hi));
+  float2 hi = size + off * 2.0 - float2(1.0);
+  half4 col = content.eval(clamp(coord + n * amount * k, float2(0.0), hi));
   if (chroma > 0.5) {
-    float r = content.eval(clamp(coord - n * amount * k * 1.35, float2(0.0), hi)).r;
-    float b = content.eval(clamp(coord - n * amount * k * 0.65, float2(0.0), hi)).b;
+    float r = content.eval(clamp(coord + n * amount * k * 1.35, float2(0.0), hi)).r;
+    float b = content.eval(clamp(coord + n * amount * k * 0.65, float2(0.0), hi)).b;
     col = half4(half(r), col.g, half(b), col.a);
   }
   col.rgb += half3(half(0.14 * k * k));
@@ -121,7 +122,7 @@ private fun levelOf(q: GlassQuality): Int {
     }
 }
 
-private fun effectFor(level: Int, density: Float, w: Float, h: Float, cornerPx: Float): androidx.compose.ui.graphics.RenderEffect {
+private fun effectFor(level: Int, density: Float, w: Float, h: Float, cornerPx: Float, margin: Float): androidx.compose.ui.graphics.RenderEffect {
     val p = PRESETS[level]
     val cm = ColorMatrix().apply { setSaturation(p.saturation) }
     var e = AndroidRenderEffect.createColorFilterEffect(ColorMatrixColorFilter(cm))
@@ -131,6 +132,7 @@ private fun effectFor(level: Int, density: Float, w: Float, h: Float, cornerPx: 
     if (level >= 2 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val s = RuntimeShader(LENS)
         s.setFloatUniform("size", w, h)
+        s.setFloatUniform("off", margin, margin)
         s.setFloatUniform("corner", cornerPx)
         s.setFloatUniform("height", minOf(p.refractHeightDp * density, cornerPx.coerceAtLeast(1f)))
         s.setFloatUniform("amount", p.refractAmountDp * density)
@@ -156,14 +158,16 @@ fun Modifier.glassPanel(backdrop: GlassBackdrop, shape: Shape, quality: GlassQua
             val outline = shape.createOutline(size, layoutDirection, this)
             if (level > 0 && w >= 1f && h >= 1f) {
                 val cornerPx = minOf(corner.toPx(), minOf(w, h) / 2f)
-                layer.renderEffect = effectFor(level, density, w, h, cornerPx)
+                val mi = if (level >= 2) Math.ceil((PRESETS[level].refractAmountDp * density).toDouble()).toInt() else 0
+                val mf = mi.toFloat()
+                layer.renderEffect = effectFor(level, density, w, h, cornerPx, mf)
                 val dx = pos.x - backdrop.origin.x
                 val dy = pos.y - backdrop.origin.y
-                layer.record(this, layoutDirection, IntSize(w.toInt(), h.toInt())) {
-                    translate(-dx, -dy) { drawLayer(backdrop.layer) }
+                layer.record(this, layoutDirection, IntSize(w.toInt() + 2 * mi, h.toInt() + 2 * mi)) {
+                    translate(-dx + mf, -dy + mf) { drawLayer(backdrop.layer) }
                 }
                 val path = outlinePath(outline)
-                clipPath(path) { drawLayer(layer) }
+                clipPath(path) { translate(-mf, -mf) { drawLayer(layer) } }
             }
             val shapePath = outlinePath(outline)
             drawPath(shapePath, color = tint)
