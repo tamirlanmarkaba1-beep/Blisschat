@@ -65,10 +65,10 @@ fun Modifier.glassSource(backdrop: GlassBackdrop): Modifier =
 private class Preset(val blurDp: Float, val saturation: Float, val refractHeightDp: Float, val refractAmountDp: Float, val chroma: Boolean, val rim: Float)
 
 private val PRESETS = listOf(
-    Preset(0f, 1f, 0f, 0f, false, 0.35f),          // LOW  (not used for blur)
-    Preset(18f, 1.35f, 0f, 0f, false, 0.45f),      // HIGH
-    Preset(10f, 1.5f, 14f, 16f, false, 0.55f),     // ULTRA
-    Preset(7f, 1.7f, 26f, 34f, true, 0.7f)         // EXTREME
+    Preset(0f, 1f, 0f, 0f, false, 0.35f),
+    Preset(18f, 1.35f, 0f, 0f, false, 0.45f),
+    Preset(5f, 1.5f, 24f, 38f, false, 0.6f),
+    Preset(2.5f, 1.7f, 44f, 78f, true, 0.8f)
 )
 
 private const val LENS = """
@@ -89,7 +89,7 @@ half4 main(float2 coord) {
   float d = -sdf(p);
   if (d >= height || d < 0.0) { return content.eval(coord); }
   float t = 1.0 - d / height;
-  float k = t * t * t;
+  float k = t * (0.3 + 0.7 * t);
   float2 g = float2(sdf(p + float2(1.0, 0.0)) - sdf(p - float2(1.0, 0.0)),
                     sdf(p + float2(0.0, 1.0)) - sdf(p - float2(0.0, 1.0)));
   float2 n = g / max(length(g), 0.0001);
@@ -100,7 +100,7 @@ half4 main(float2 coord) {
     float b = content.eval(clamp(coord - n * amount * k * 0.65, float2(0.0), hi)).b;
     col = half4(half(r), col.g, half(b), col.a);
   }
-  col.rgb += half3(half(0.08 * k));
+  col.rgb += half3(half(0.14 * k * k));
   return col;
 }
 """
