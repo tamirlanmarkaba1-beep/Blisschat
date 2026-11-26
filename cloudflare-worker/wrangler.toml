@@ -1,0 +1,9 @@
+name = "blisschat-push"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "bitrate-71684"
+
+# The service account key is NOT stored here. Add it as a secret:
+#   wrangler secret put SERVICE_ACCOUNT_JSON
