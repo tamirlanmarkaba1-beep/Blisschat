@@ -1,0 +1,60 @@
+name: Build blisschat glass
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  glass:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+      - name: Use release keystore from secrets only if it is valid
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > /tmp/secret.keystore || true
+            if [ -n "$STORE_PASSWORD" ] && keytool -list -keystore /tmp/secret.keystore -storepass "$STORE_PASSWORD" >/dev/null 2>&1; then
+              cp /tmp/secret.keystore app/release.keystore
+              echo "Using the keystore from secrets"
+            else
+              echo "Secret keystore is not usable, keeping the one from the repository"
+            fi
+          fi
+          ls -la app/release.keystore || echo "no keystore in the repo: the APK will be signed with the debug key"
+      - name: Build glass APK
+        env:
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle assembleRelease -Pglass=true --no-daemon
+      - name: Rename
+        run: cp app/build/outputs/apk/release/app-release.apk blisschat-glass.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blisschat-glass-apk
+          path: blisschat-glass.apk
+      - name: Attach to the latest release (waits for the main build to create it)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 30); do
+            tag=$(gh release list -L 1 --json tagName -q '.[0].tagName' || true)
+            if [ -n "$tag" ]; then
+              gh release upload "$tag" blisschat-glass.apk --clobber && exit 0
+            fi
+            sleep 20
+          done
+          echo "No release found; the APK is available as a workflow artifact."
