@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<paths>
-    <!-- DownloadManager saves the update to getExternalFilesDir(DIRECTORY_DOWNLOADS) = Android/data/<package>/files/Download -->
-    <external-files-path name="updates" path="Download/" />
-    <external-files-path name="plugins" path="Plugins/" />
-</paths>
