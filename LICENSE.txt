@@ -1,0 +1,28 @@
+Copyright (c) 2026 tamirlanmarkaba1-beep. All Rights Reserved.
+
+SOURCE-AVAILABLE LICENSE (VIEW AND FORK FOR PERSONAL LEARNING ONLY)
+
+1. Permitted Uses
+You are permitted to view, download, and fork this repository on GitHub 
+solely for personal, non-commercial educational and study purposes.
+
+2. Restrictions
+Without the prior express written permission of the copyright holder, you 
+may NOT:
+- Distribute, publish, host, or make available this software, its source 
+  code, or compiled binaries (including APK files) to any third party;
+- Use this software or any part of its source code for any commercial 
+  purpose or in any commercial product;
+- Remove, alter, or obscure any copyright notices, author attributions, 
+  or license terms in the source code;
+- Claim authorship or present this software or its derivative works as 
+  your own.
+
+3. No Warranty
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
+SOFTWARE.
