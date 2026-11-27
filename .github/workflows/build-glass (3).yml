@@ -1,0 +1,81 @@
+name: Build blisschat glass
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  glass:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      # the signing key of the glass app is created once and kept in the GitHub cache, so every build is signed the same way
+      - name: Restore glass signing key
+        uses: actions/cache@v4
+        with:
+          path: glass.keystore
+          key: glass-keystore-v1
+
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          S_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          S_ALIAS: ${{ secrets.KEY_ALIAS }}
+          S_KEYPASS: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          rm -f app/release.keystore
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$S_PASS" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > /tmp/secret.keystore || true
+            if keytool -list -keystore /tmp/secret.keystore -storepass "$S_PASS" >/dev/null 2>&1; then
+              cp /tmp/secret.keystore app/release.keystore
+              echo "STORE_PASSWORD=$S_PASS" >> "$GITHUB_ENV"
+              echo "KEY_ALIAS=$S_ALIAS" >> "$GITHUB_ENV"
+              echo "KEY_PASSWORD=$S_KEYPASS" >> "$GITHUB_ENV"
+              echo "Using the keystore from secrets"
+            fi
+          fi
+          if [ ! -f app/release.keystore ]; then
+            if [ ! -f glass.keystore ]; then
+              keytool -genkeypair -keystore glass.keystore -alias bliss -keyalg RSA -keysize 2048 -validity 10000 \
+                -storepass 123456 -keypass 123456 -dname "CN=blisschat glass"
+              echo "Created a new glass signing key"
+            fi
+            cp glass.keystore app/release.keystore
+            echo "STORE_PASSWORD=123456" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=bliss" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=123456" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build glass APK
+        env:
+          BLISS_GLASS: "true"
+        run: gradle assembleRelease -Pglass=true --no-daemon
+      - name: Rename
+        run: cp app/build/outputs/apk/release/app-release.apk blisschat-glass.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blisschat-glass-apk
+          path: blisschat-glass.apk
+      - name: Attach to the latest release (waits for the main build to create it)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 30); do
+            tag=$(gh release list -L 1 --json tagName -q '.[0].tagName' || true)
+            if [ -n "$tag" ]; then
+              gh release upload "$tag" blisschat-glass.apk --clobber && exit 0
+            fi
+            sleep 20
+          done
+          echo "No release found; the APK is available as a workflow artifact."
