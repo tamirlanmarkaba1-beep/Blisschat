@@ -168,7 +168,7 @@ private fun MainNav(container: AppContainer) {
 
     val glassBackdrop = com.bliss.blisschat.ui.glass.rememberGlassBackdrop()
     val screenBackdrop = com.bliss.blisschat.ui.glass.rememberGlassBackdrop()
-    androidx.compose.runtime.CompositionLocalProvider(com.bliss.blisschat.ui.glass.LocalGlassBackdrop provides (if (BuildConfig.GLASS) screenBackdrop else null)) {
+    androidx.compose.runtime.CompositionLocalProvider(com.bliss.blisschat.ui.glass.LocalGlassBackdrop provides (if (com.bliss.blisschat.BuildConfig.GLASS) screenBackdrop else null)) {
     Box(Modifier.fillMaxSize()) {
         NavHost(
             navController = nav, startDestination = "chats", modifier = Modifier.fillMaxSize().glassSource(glassBackdrop),
