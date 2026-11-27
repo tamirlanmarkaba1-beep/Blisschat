@@ -1,6 +1,0 @@
-{
-  "versionCode": 3,
-  "versionName": "2.1.0",
-  "apkUrl": "https://github.com/tamirlanmarkaba1-beep/BlissAi/releases/download/Messenger/app-debug.apk",
-  "changelog": "Автообновление через GitHub\nКаналы и новое окно «Создать»: канал, группа, бот\nФото и аватарки снова загружаются\nPush-звонки: на весь экран и сверху\nТеги в группах, плагины, стикеры\nМеню сообщения под сообщением с размытым фоном"
-}
