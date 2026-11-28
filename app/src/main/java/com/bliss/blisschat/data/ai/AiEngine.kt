@@ -4,6 +4,7 @@ import android.content.Context
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -82,40 +83,107 @@ class AiEngine(context: Context) {
                     put(JSONObject().put("category", "HARM_CATEGORY_SEXUALLY_EXPLICIT").put("threshold", "BLOCK_ONLY_HIGH"))
                     put(JSONObject().put("category", "HARM_CATEGORY_DANGEROUS_CONTENT").put("threshold", "BLOCK_ONLY_HIGH"))
                 })
-            val conn = URL("https://generativelanguage.googleapis.com/v1beta/models/${model.ifBlank { DEFAULT_MODEL }}:generateContent")
-                .openConnection() as HttpURLConnection
-            try {
-                conn.requestMethod = "POST"
-                conn.connectTimeout = 15_000
-                conn.readTimeout = 40_000
-                conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.setRequestProperty("x-goog-api-key", key.trim())
-                conn.outputStream.use { it.write(body.toString().toByteArray()) }
-                val code = conn.responseCode
-                val text = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (code !in 200..299) {
-                    val msg = runCatching { JSONObject(text).getJSONObject("error").getString("message") }.getOrDefault("")
-                    error(when (code) {
-                        400, 401, 403 -> "Gemini не принял ключ или запрос ($code). ${msg.take(120)}"
-                        429 -> "Лимит запросов Gemini исчерпан, попробуйте позже"
-                        else -> "Gemini ответил $code. ${msg.take(120)}"
-                    })
+            val primaryModel = cleanModel(model)
+            val modelsToTry = listOf(primaryModel) + FALLBACK_MODELS.filter { it != primaryModel }
+            var last503: GeminiHttpException? = null
+            var lastUnavailable: GeminiHttpException? = null
+
+            for (candidateModel in modelsToTry) {
+                // Initial request + three retries: 1s, 2s, 4s.
+                for (attempt in 0..3) {
+                    try {
+                        return@runCatching requestGemini(candidateModel, key, body)
+                    } catch (e: GeminiHttpException) {
+                        when (e.statusCode) {
+                            503 -> {
+                                last503 = e
+                                if (attempt < 3) delay(RETRY_DELAYS_MS[attempt])
+                            }
+                            404 -> {
+                                lastUnavailable = e
+                                break // This model is not available; try the next one.
+                            }
+                            else -> throw e
+                        }
+                    }
                 }
-                val parts = JSONObject(text).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
-                val out = StringBuilder()
-                if (parts != null) for (i in 0 until parts.length()) out.append(parts.getJSONObject(i).optString("text"))
-                val clean = out.toString().replace("**", "").replace("__", "").trim().take(600)
-                if (clean.isEmpty()) error("ИИ не стал отвечать на это")
-                clean
-            } finally {
-                conn.disconnect()
             }
+            if (last503 != null) {
+                error("Gemini временно перегружен (503). Не удалось получить ответ ни от основной, ни от резервных моделей. ${last503.message.orEmpty()}")
+            }
+            error("Основная и резервные модели Gemini недоступны. ${lastUnavailable?.message.orEmpty()}")
+
         }
     }
 
+
+
+    /**
+     * Sends one request using a normalized model id. Both official and personal AIs
+     * use this same path through [reply].
+     */
+    private fun requestGemini(model: String, key: String, body: JSONObject): String {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
+        val conn = URL(url).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 40_000
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.setRequestProperty("x-goog-api-key", key.trim().replace(Regex("\\s+"), ""))
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val responseText = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+
+            if (code !in 200..299) {
+                val message = runCatching {
+                    JSONObject(responseText).getJSONObject("error").getString("message")
+                }.getOrDefault(responseText.take(160))
+                val userMessage = when (code) {
+                    400, 401, 403 -> "Gemini не принял ключ или запрос ($code). ${message.take(120)}"
+                    429 -> "Лимит запросов Gemini исчерпан, попробуйте позже"
+                    503 -> "Gemini временно перегружен (503). ${message.take(120)}"
+                    else -> "Gemini ответил $code. ${message.take(120)}"
+                }
+                throw GeminiHttpException(code, userMessage)
+            }
+
+            val parts = JSONObject(responseText).optJSONArray("candidates")
+                ?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+            val output = StringBuilder()
+            if (parts != null) {
+                for (i in 0 until parts.length()) {
+                    output.append(parts.optJSONObject(i)?.optString("text").orEmpty())
+                }
+            }
+            val clean = output.toString().replace("**", "").replace("__", "").trim().take(600)
+            if (clean.isEmpty()) error("ИИ не стал отвечать на это")
+            return clean
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** Removes whitespace and any repeated leading "models/" prefix. */
+    private fun cleanModel(rawModel: String): String {
+        var value = rawModel.trim().replace(Regex("\\s+"), "")
+        while (value.startsWith("models/", ignoreCase = true)) {
+            value = value.substring("models/".length)
+        }
+        return value.ifBlank { DEFAULT_MODEL }
+    }
+
+    private class GeminiHttpException(
+        val statusCode: Int,
+        message: String
+    ) : Exception(message)
+
     companion object {
         const val DEFAULT_MODEL = "gemini-flash-latest"
+        private val FALLBACK_MODELS = listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+        private val RETRY_DELAYS_MS = longArrayOf(1_000L, 2_000L, 4_000L)
 
         /**
          * If [text] starts with one of [triggers] (a word, case-insensitive, then a space or punctuation or the end), returns the
