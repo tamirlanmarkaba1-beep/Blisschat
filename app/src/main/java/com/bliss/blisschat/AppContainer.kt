@@ -74,6 +74,7 @@ class AppContainer(context: Context) {
     val groupCalls = com.bliss.blisschat.data.call.GroupCallManager(context.applicationContext, calls)
     val updates = UpdateManager(context.applicationContext)
     val bots = BotRepository(context.applicationContext)
+    val ai = com.bliss.blisschat.data.ai.AiEngine(context.applicationContext)
     val systemBot = SystemBot(context.applicationContext)
     val stickers = StickerStore(context.applicationContext)
     private val appContext = context.applicationContext

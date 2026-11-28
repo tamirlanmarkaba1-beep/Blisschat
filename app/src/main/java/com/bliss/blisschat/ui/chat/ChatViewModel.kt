@@ -15,6 +15,10 @@ import com.bliss.blisschat.data.Content
 import com.bliss.blisschat.data.Message
 import com.bliss.blisschat.data.UiMessage
 import com.bliss.blisschat.data.UserProfile
+import com.bliss.blisschat.data.OFFICIAL_GROUP
+import com.bliss.blisschat.data.ai.AiEngine
+import com.bliss.blisschat.data.ai.OFFICIAL_AI_ID
+import com.bliss.blisschat.data.ai.OFFICIAL_AI_NAME
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -134,6 +138,65 @@ class ChatViewModel(private val c: AppContainer, private val chatId: String) : V
 
     val settings: StateFlow<AppSettings> = c.settings.settings.stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
 
+    /* ---- AI: the official Gemini in the official group, and AIs created by me (they answer from this phone) */
+
+    private val myAis: StateFlow<List<UserProfile>> = c.session.flatMapLatest { se ->
+        val uid = (se as? Session.Ready)?.user?.uid ?: return@flatMapLatest flowOf(emptyList())
+        c.bots.observeMyBots(uid).map { l -> l.filter { it.isAi } }
+    }.catch { emit(emptyList()) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val _aiTyping = MutableStateFlow<String?>(null)
+    /** Name of the AI that is writing an answer right now. */
+    val aiTyping: StateFlow<String?> = _aiTyping.asStateFlow()
+
+    private fun historyLines(s: ChatUiState): List<String> =
+        s.messages.filter { !it.message.deleted && it.content != null && it.content.kind == Content.KIND_TEXT && it.content.text.isNotBlank() }
+            .takeLast(40).map { u ->
+                val ct = u.content!!
+                val who = if (ct.via.isNotEmpty()) ct.viaName else (s.users[u.message.senderId]?.title ?: "кто-то")
+                who + ": " + ct.text.take(300)
+            }
+
+    /** Called after my message was sent: an AI that was addressed (by name) answers. Secret chats are never sent to an AI. */
+    private fun maybeAiReply(chat: Chat, s: ChatUiState, text: String) {
+        if (chat.secret) return
+        val asker = s.users[s.myId]?.title ?: "Собеседник"
+        val history = historyLines(s)
+        if (chat.id == OFFICIAL_GROUP) {
+            val q = AiEngine.stripTrigger(text, listOf("гемини", "gemini", "джемини"))
+            if (q != null) { answerAs(chat, s.myId, OFFICIAL_AI_ID, OFFICIAL_AI_NAME, "", null, history, asker, q); return }
+        }
+        for (ai in myAis.value) {
+            val direct = chat.type == ChatType.DIRECT && chat.peerOf(s.myId) == ai.uid
+            val q = if (direct) text else AiEngine.stripTrigger(text, listOf(ai.displayName, "@" + ai.username))
+            if (q != null) { answerAs(chat, s.myId, ai.uid, ai.title, ai.aiPrompt, ai.uid, history, asker, q); return }
+        }
+    }
+
+    /** @param ownKeyOf uid of my AI whose local key is used; null = the official AI with the key from the admin settings */
+    private fun answerAs(
+        chat: Chat, myId: String, aiId: String, aiName: String, persona: String, ownKeyOf: String?,
+        history: List<String>, asker: String, question: String
+    ) {
+        viewModelScope.launch {
+            _aiTyping.value = aiName
+            try {
+                val (key, model) = if (ownKeyOf == null) c.ai.official() else c.ai.keyOf(ownKeyOf) to AiEngine.DEFAULT_MODEL
+                if (key.isBlank()) {
+                    _events.tryEmit(if (ownKeyOf == null) "У ИИ нет ключа: админ должен вставить его в панели администратора" else "Для «$aiName» не задан API-ключ (Настройки → Мои боты и ИИ)")
+                    return@launch
+                }
+                val r = c.ai.reply(aiName, persona, key, model, history, asker, question)
+                r.onSuccess { answer -> c.repo.send(chat, myId, Content(Content.KIND_TEXT, text = answer, via = aiId, viaName = aiName)) }
+                    .onFailure { _events.tryEmit("$aiName: ${it.message}") }
+            } catch (e: Exception) {
+                _events.tryEmit("$aiName: ${e.message ?: "ошибка"}")
+            } finally {
+                _aiTyping.value = null
+            }
+        }
+    }
+
     /** True while the chat screen is on screen; used to count time spent in a group (for rank tags). */
     @Volatile private var active = false
     fun setActive(value: Boolean) { active = value }
@@ -198,7 +261,11 @@ class ChatViewModel(private val c: AppContainer, private val chatId: String) : V
             val body = c.plugins.runtime.transformOutgoing(text.trim()).trim()
             if (body.isEmpty()) return@launch
             c.repo.send(chat, s.myId, Content(Content.KIND_TEXT, text = body, replyToId = _replyTo.value?.message?.id.orEmpty()))
-                .onSuccess { _replyTo.value = null; if (chat.type != ChatType.DIRECT) c.repo.touchStats(chatId, s.myId, 0, 1) }
+                .onSuccess {
+                    _replyTo.value = null
+                    if (chat.type != ChatType.DIRECT) c.repo.touchStats(chatId, s.myId, 0, 1)
+                    maybeAiReply(chat, state.value, body)
+                }
                 .onFailure { _events.tryEmit("Не отправлено: ${it.message}"); onFailure(text) }
         }
     }

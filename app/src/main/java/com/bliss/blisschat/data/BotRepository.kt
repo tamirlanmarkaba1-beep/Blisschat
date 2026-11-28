@@ -80,4 +80,64 @@ class BotRepository(private val context: Context) {
         }
         "$username:$password"
     }.mapFailure()
+
+    suspend fun updateMiniApp(botUid: String, url: String): Result<Unit> = runCatching {
+        val clean = url.trim()
+        require(clean.isEmpty() || clean.startsWith("https://")) { "Ссылка должна начинаться с https://" }
+        FirebaseFirestore.getInstance().collection("users").document(botUid).update("miniAppUrl", clean.take(500)).await()
+        Unit
+    }.mapFailure()
+
+    suspend fun updateAi(aiUid: String, name: String, prompt: String): Result<Unit> = runCatching {
+        require(name.isNotBlank()) { "Введите имя" }
+        FirebaseFirestore.getInstance().collection("users").document(aiUid)
+            .update(mapOf("displayName" to name.trim().take(40), "aiPrompt" to prompt.trim().take(1500))).await()
+        Unit
+    }.mapFailure()
+
+    /**
+     * An AI is a profile (username ends with "_ai", flag ai = true) that can be found and written to like a person. It has no
+     * password anybody knows: it answers from the phone of its owner, using the owner's own Gemini API key.
+     * @return the uid of the new AI
+     */
+    suspend fun createAi(owner: UserProfile, name: String, rawUsername: String, prompt: String): Result<String> = runCatching {
+        val username = rawUsername.trim().removePrefix("@").lowercase()
+        require(name.isNotBlank()) { "Введите имя ИИ" }
+        require(Regex("^[a-z][a-z0-9_]{1,26}_ai$").matches(username)) {
+            "Имя ИИ: латиница, цифры и _, оно должно заканчиваться на _ai"
+        }
+        require(username != "gemini_ai") { "Это имя зарезервировано" }
+        val main = FirebaseFirestore.getInstance()
+        require(!main.collection("usernames").document(username).get().await().exists()) { "@$username уже занят" }
+
+        val app = runCatching { FirebaseApp.getInstance("bots") }
+            .getOrElse { FirebaseApp.initializeApp(context, FirebaseApp.getInstance().options, "bots") }
+        val auth = FirebaseAuth.getInstance(app)
+        val db = FirebaseFirestore.getInstance(app)
+
+        val password = Crypto.b64(Crypto.randomBytes(24)).replace('+', 'A').replace('/', 'B')
+        val email = "$username@ai.blisschat.app"
+        val created = auth.createUserWithEmailAndPassword(email, password).await()
+        val uid = created.user?.uid ?: error("Не удалось создать ИИ")
+        try {
+            val now = System.currentTimeMillis()
+            val batch = db.batch()
+            batch.set(db.collection("usernames").document(username), mapOf("uid" to uid, "email" to email))
+            batch.set(
+                db.collection("users").document(uid),
+                mapOf(
+                    "displayName" to name.trim().take(40), "username" to username, "email" to email, "avatarUrl" to "", "bio" to "ИИ",
+                    "verified" to false, "support" to false, "publicKey" to "", "kid" to "", "ai" to true, "ownerId" to owner.uid,
+                    "aiPrompt" to prompt.trim().take(1500), "lastSeen" to now, "createdAt" to now
+                )
+            )
+            batch.commit().await()
+        } catch (e: Exception) {
+            runCatching { created.user?.delete()?.await() }
+            throw e
+        } finally {
+            auth.signOut()
+        }
+        uid
+    }.mapFailure()
 }

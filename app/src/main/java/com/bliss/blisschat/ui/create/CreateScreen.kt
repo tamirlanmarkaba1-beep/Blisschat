@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Title
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,6 +82,7 @@ private enum class Kind(val title: String, val subtitle: String, val icon: Image
     CHANNEL("Канал", "Пишете только вы, читают подписчики", Icons.Filled.Campaign),
     GROUP("Группа", "Общий чат, теги и звания участников", Icons.Filled.Group),
     BOT("Бот", "Автоматический помощник на Python", Icons.Filled.SmartToy),
+    AI("ИИ", "Свой ИИ на Gemini по вашему API-ключу", Icons.Filled.AutoAwesome),
     FIND("Найти группу или канал", "Поиск по публичному @имени", Icons.Filled.Search)
 }
 
@@ -158,6 +161,8 @@ private fun Form(kindName: String, vm: CreateViewModel, onOpenChat: (String) -> 
         if (uri != null) vm.pickAvatar(uri) { r -> r.onSuccess { avatarUrl = it }.onFailure { error = it.message } }
     }
     var token by remember { mutableStateOf<String?>(null) }
+    var aiKey by remember { mutableStateOf("") }
+    var aiDone by remember { mutableStateOf<String?>(null) }
 
     val chatResult: (Result<String>) -> Unit = { r -> busy = false; r.onSuccess(onOpenChat).onFailure { error = it.message } }
 
@@ -205,6 +210,24 @@ private fun Form(kindName: String, vm: CreateViewModel, onOpenChat: (String) -> 
                 }
                 if (searched && found == null) Text("Ничего не найдено. Проверьте @username: искать можно только публичные группы и каналы.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Kind.AI -> {
+                PillTextField(name, { name = it.take(40); error = null }, "Имя ИИ (так к нему обращаются)", leading = Icons.Filled.AutoAwesome)
+                PillTextField(username, { username = it.trim(); error = null }, "username (оканчивается на _ai)", leading = Icons.Filled.AlternateEmail)
+                PillTextField(
+                    aiKey, { aiKey = it.trim(); error = null }, "API-ключ Gemini", leading = Icons.Filled.Key,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
+                )
+                PillTextField(
+                    description, { description = it.take(1500); error = null }, "Характер ИИ (необязательно): как говорит, кто он",
+                    singleLine = false, maxLines = 6, shape = RoundedCornerShape(24.dp)
+                )
+                Text(
+                    "Ключ бесплатно выдаёт Google AI Studio (aistudio.google.com/apikey). Он хранится только на этом телефоне, в базу не попадает. " +
+                        "ИИ отвечает с вашего телефона, пока приложение запущено: ему можно написать в личку (найдите его по @username) " +
+                        "или позвать в любом чате по имени, например «имя, привет».",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Kind.BOT -> {
                 PillTextField(name, { name = it.take(40); error = null }, "Имя бота", leading = Icons.Filled.SmartToy)
                 PillTextField(username, { username = it.trim(); error = null }, "username (оканчивается на _bot)", leading = Icons.Filled.AlternateEmail)
@@ -213,7 +236,7 @@ private fun Form(kindName: String, vm: CreateViewModel, onOpenChat: (String) -> 
                     singleLine = false, maxLines = 12, shape = RoundedCornerShape(24.dp)
                 )
                 Text(
-                    "Код можно изменить позже: Настройки → «Мои боты (Python)».",
+                    "Код можно изменить позже: Настройки → «Боты и ИИ».",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
@@ -226,7 +249,7 @@ private fun Form(kindName: String, vm: CreateViewModel, onOpenChat: (String) -> 
         Spacer(Modifier.height(4.dp))
         BouncyButton(
             when (kind) {
-                Kind.DIRECT -> "Начать чат"; Kind.CHANNEL -> "Создать канал"; Kind.GROUP -> "Создать группу"; Kind.BOT -> "Создать бота"
+                Kind.DIRECT -> "Начать чат"; Kind.CHANNEL -> "Создать канал"; Kind.GROUP -> "Создать группу"; Kind.BOT -> "Создать бота"; Kind.AI -> "Создать ИИ"
                 Kind.FIND -> if (found == null) "Найти" else if (foundMember) "Открыть" else "Вступить"
             },
             loading = busy, modifier = Modifier.fillMaxWidth(),
@@ -244,11 +267,22 @@ private fun Form(kindName: String, vm: CreateViewModel, onOpenChat: (String) -> 
                     Kind.DIRECT -> vm.startDirect(username, chatResult)
                     Kind.CHANNEL -> vm.createGroup(name, members, true, avatarUrl, pubName, description, chatResult)
                     Kind.GROUP -> vm.createGroup(name, members, false, avatarUrl, pubName, description, chatResult)
+                    Kind.AI -> vm.createAi(name, username, aiKey, description) { r -> busy = false; r.onSuccess { aiDone = username.trim().removePrefix("@").lowercase() }.onFailure { error = it.message } }
                     Kind.BOT -> vm.createBot(name, username, botCode) { r -> busy = false; r.onSuccess { token = it }.onFailure { error = it.message } }
                 }
             }
         )
         Spacer(Modifier.height(100.dp))
+    }
+
+    aiDone?.let { u ->
+        AlertDialog(
+            onDismissRequest = {}, shape = RoundedCornerShape(30.dp),
+            icon = { Icon(Icons.Filled.AutoAwesome, null) },
+            title = { Text("ИИ создан") },
+            text = { Text("@$u готов. Найдите его в поиске и напишите. В группах зовите по имени: «имя, привет». Ключ можно сменить: Настройки → Мои боты и ИИ.") },
+            confirmButton = { TextButton(onClick = { aiDone = null; onClose() }) { Text("Готово") } }
+        )
     }
 
     token?.let { t ->

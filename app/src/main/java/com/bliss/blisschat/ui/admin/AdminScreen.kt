@@ -63,6 +63,23 @@ fun AdminScreen(container: AppContainer, onBack: () -> Unit) {
             }
             item {
                 Card {
+                    var aiKey by remember { mutableStateOf("") }
+                    var aiModel by remember { mutableStateOf("gemini-flash-latest") }
+                    Text("Официальный ИИ (gemini)", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Ключ Gemini API для ИИ в официальной группе. Его читают все вошедшие пользователи приложения, поэтому ограничьте ключ квотами в Google AI Studio.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    PillTextField(aiKey, { aiKey = it.trim() }, "API-ключ Gemini")
+                    Spacer(Modifier.height(8.dp))
+                    PillTextField(aiModel, { aiModel = it.trim() }, "Модель")
+                    TextButton(onClick = { vm.saveAiKey(aiKey, aiModel); aiKey = "" }, enabled = aiKey.length > 10) { Text("Сохранить") }
+                }
+            }
+            item {
+                Card {
                     Text("Значки пользователя", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(10.dp))
                     PillTextField(query, { query = it.trim().removePrefix("@") }, "@username", leading = Icons.Filled.Search,

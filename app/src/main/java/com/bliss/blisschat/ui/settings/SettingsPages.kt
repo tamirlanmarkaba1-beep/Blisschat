@@ -427,32 +427,71 @@ fun BotsPage(container: AppContainer, onBack: () -> Unit) {
     val vm: SettingsViewModel = viewModel(factory = container.factory())
     val myBots by vm.myBots.collectAsStateWithLifecycle()
 
-    SettingsPage("боты", onBack) {
+    SettingsPage("боты и ИИ", onBack) {
         Spacer(Modifier.height(4.dp))
         SCard {
             if (myBots.isEmpty()) {
                 Text(
-                    "У вас нет созданных ботов. Создать бота можно через меню создания (+) → «Создать бота». Как написать бота: Настройки → Руководство.",
+                    "У вас нет ботов и ИИ. Создать можно через меню создания (+) → «Бот» или «ИИ». Как написать бота: Настройки → Руководство.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
                 myBots.forEach { bot ->
-                    var codeInput by remember(bot.uid) { mutableStateOf(bot.pythonCode) }
                     var editing by remember(bot.uid) { mutableStateOf(false) }
+                    var codeInput by remember(bot.uid) { mutableStateOf(bot.pythonCode) }
+                    var nameInput by remember(bot.uid) { mutableStateOf(bot.displayName) }
+                    var promptInput by remember(bot.uid) { mutableStateOf(bot.aiPrompt) }
+                    var keyInput by remember(bot.uid) { mutableStateOf("") }
+                    var miniInput by remember(bot.uid) { mutableStateOf(bot.miniAppUrl) }
+                    var info by remember(bot.uid) { mutableStateOf<String?>(null) }
                     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("@${bot.username} (${bot.displayName})", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { editing = !editing }) { Text(if (editing) "Закрыть" else "Код") }
+                            Text(
+                                (if (bot.isAi) "ИИ " else "Бот ") + "@${bot.username} (${bot.displayName})",
+                                style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { editing = !editing }) { Text(if (editing) "Закрыть" else "Настроить") }
                             TextButton(onClick = { vm.deleteBot(bot.uid) }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
                         }
-                        if (editing) {
+                        if (editing && bot.isAi) {
+                            OutlinedTextField(value = nameInput, onValueChange = { nameInput = it.take(40) }, label = { Text("Имя") }, modifier = Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = keyInput, onValueChange = { keyInput = it.trim() },
+                                label = { Text(if (vm.hasAiKey(bot.uid)) "Новый API-ключ (пусто — оставить)" else "API-ключ Gemini (нужен!)") },
+                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = promptInput, onValueChange = { promptInput = it.take(1500) }, label = { Text("Характер") },
+                                modifier = Modifier.fillMaxWidth().height(140.dp)
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            BouncyButton("Сохранить", onClick = {
+                                vm.updateAi(bot.uid, nameInput, promptInput, keyInput) { r ->
+                                    info = r.fold({ "Сохранено" }, { it.message ?: "Ошибка" }); keyInput = ""
+                                }
+                            })
+                        } else if (editing) {
+                            OutlinedTextField(
+                                value = miniInput, onValueChange = { miniInput = it.trim() },
+                                label = { Text("Мини-приложение: ссылка https://… (пусто — нет)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            BouncyButton("Сохранить ссылку", onClick = {
+                                vm.updateMiniApp(bot.uid, miniInput) { r -> info = r.fold({ "Сохранено" }, { it.message ?: "Ошибка" }) }
+                            })
+                            Spacer(Modifier.height(12.dp))
                             OutlinedTextField(
                                 value = codeInput, onValueChange = { codeInput = it }, label = { Text("Python скрипт бота") },
                                 modifier = Modifier.fillMaxWidth().height(180.dp)
                             )
                             Spacer(Modifier.height(8.dp))
-                            BouncyButton("Сохранить скрипт", onClick = { vm.updateBotCode(bot.uid, codeInput) { } })
+                            BouncyButton("Сохранить скрипт", onClick = { vm.updateBotCode(bot.uid, codeInput) { ok -> info = if (ok) "Сохранено" else "Ошибка" } })
                         }
+                        info?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 6.dp)) }
                     }
                 }
             }

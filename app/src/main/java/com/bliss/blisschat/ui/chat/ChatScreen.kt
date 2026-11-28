@@ -74,6 +74,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -244,6 +245,7 @@ fun ChatScreen(container: AppContainer, chatId: String, onBack: () -> Unit, onOp
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm) { vm.events.collect { snackbar.showSnackbar(it) } }
     val keyLost by vm.keyLost.collectAsStateWithLifecycle()
+    val aiTyping by vm.aiTyping.collectAsStateWithLifecycle()
     var scrollToId by remember { mutableStateOf<String?>(null) }
 
     var draft by rememberSaveable { mutableStateOf("") }
@@ -357,7 +359,11 @@ fun ChatScreen(container: AppContainer, chatId: String, onBack: () -> Unit, onOp
     val blurRadius by animateDpAsState(if (actionFor != null) 18.dp else 0.dp, tween(220), label = "menu-blur")
     val pstyle by container.plugins.runtime.style.collectAsStateWithLifecycle()
     val pluginItems by container.plugins.runtime.actions.collectAsStateWithLifecycle()
-    CompositionLocalProvider(LocalChatActions provides actions, LocalPluginStyle provides pstyle) {
+    var miniApp by remember { mutableStateOf<Pair<String, String>?>(null) }
+    CompositionLocalProvider(LocalChatActions provides actions, LocalPluginStyle provides pstyle, LocalMiniApp provides { t, u -> miniApp = t to u }) {
+    miniApp?.let { (t, u) ->
+        MiniAppDialog(t, u, s.myId, s.users[s.myId]?.title.orEmpty(), s.users[s.myId]?.username.orEmpty()) { miniApp = null }
+    }
     val g = glassActive()
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }) {
     if (g) {
@@ -405,6 +411,14 @@ fun ChatScreen(container: AppContainer, chatId: String, onBack: () -> Unit, onOp
                         Spacer(Modifier.width(3.dp))
                         Surface(onClick = { startCall(true) }, shape = SegMid, color = inner, modifier = Modifier.size(52.dp, 52.dp).glassBar(SegMid, inner0, 6.dp)) {
                             Box(contentAlignment = Alignment.Center) { Icon(Icons.Filled.Videocam, "Видеозвонок", Modifier.size(26.dp)) }
+                        }
+                        Spacer(Modifier.width(3.dp))
+                    }
+                    val miniUrl = if (direct) other?.miniAppUrl.orEmpty() else ""
+                    if (miniUrl.isNotEmpty()) {
+                        val openMini = LocalMiniApp.current
+                        Surface(onClick = { openMini(other?.title.orEmpty(), miniUrl) }, shape = CircleShape, color = inner, modifier = Modifier.size(48.dp, 52.dp).glassBar(CircleShape, inner0, 24.dp)) {
+                            Box(contentAlignment = Alignment.Center) { Icon(Icons.Filled.Apps, "Приложение", Modifier.size(24.dp)) }
                         }
                         Spacer(Modifier.width(3.dp))
                     }
@@ -595,6 +609,9 @@ fun ChatScreen(container: AppContainer, chatId: String, onBack: () -> Unit, onOp
                                 }
                             }
                         }
+                    }
+                    aiTyping?.let { n ->
+                        Text("$n печатает…", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 20.dp, top = 4.dp))
                     }
                     replyTo?.let { r ->
                         ReplyBar(s.users[r.message.senderId]?.title ?: "…", replyPreviewOf(r)) { vm.setReply(null) }
@@ -789,13 +806,15 @@ private fun MessageList(
                 is Row2.Msg -> {
                     val u = row.m
                     val animate = remember(u.message.id) { val i = initialIds; i != null && u.message.id !in i && appeared.add(u.message.id) }
-                    val mine = u.message.senderId == s.myId
+                    // a message written by an AI (it was only forwarded by a person) is shown as the AI's own, on the left
+                    val viaC = u.content?.takeIf { it.via.isNotEmpty() }
+                    val mine = u.message.senderId == s.myId && viaC == null
                     val chatActions = LocalChatActions.current
                     val (first, last) = groups[u.message.id] ?: (true to true)
                     val bubble: @Composable () -> Unit = {
                         Box(Modifier.padding(top = if (first) 8.dp else 2.dp)) {
                             SwipeToReplyBox(enabled = !u.message.deleted && u.content != null && s.isMember, onReply = { chatActions.onReply(u) }) {
-                                MessageBubble(u, mine, s.users[u.message.senderId], chat, s.myId, repo, s.stats, settings, hiddenId == u.message.id, onLongPress, onReact, onImage, onSender, first, last, s.users)
+                                MessageBubble(u, mine, if (viaC != null) UserProfile(uid = viaC.via, displayName = viaC.viaName, username = viaC.viaName.lowercase() + "_ai", ai = true) else s.users[u.message.senderId], chat, s.myId, repo, s.stats, settings, hiddenId == u.message.id, onLongPress, onReact, onImage, if (viaC != null) ({ _: UserProfile -> }) else onSender, first, last, s.users)
                             }
                         }
                     }
@@ -958,7 +977,7 @@ private fun BubbleSurface(
         val media = !msg.deleted && !u.failed && u.content?.kind == Content.KIND_IMAGE
         Column(Modifier.padding(horizontal = if (sticker) 4.dp else if (media) 6.dp else 14.dp, vertical = if (sticker) 2.dp else if (media) 6.dp else 8.dp)) {
             if (!sticker && first) {
-                val name = (sender?.title ?: "…") + if (mine) " (вы)" else ""
+                val name = (sender?.title ?: "…") + (if (sender?.isAi == true) " · ИИ" else "") + if (mine) " (вы)" else ""
                 Row(Modifier.padding(horizontal = if (media) 8.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(name, style = MaterialTheme.typography.labelMedium, color = fg.copy(alpha = 0.6f), modifier = Modifier.weight(1f, fill = false))
                     if (sender?.verified == true) { Spacer(Modifier.width(3.dp)); Icon(Icons.Filled.Verified, null, Modifier.size(13.dp), tint = if (mine) fg else VerifiedBlue) }
@@ -992,6 +1011,23 @@ private fun BubbleSurface(
                 else -> Column {
                     if (u.content.replyToId.isNotEmpty()) QuoteBlock(u.content.replyToId, fg)
                     Text(mentionText(u.content.text, if (mine) fg else scheme.primary), style = body)
+                }
+            }
+            val btnContent = u.content?.takeIf { !msg.deleted && !u.failed }
+            if (btnContent != null && (btnContent.miniAppUrl.isNotEmpty() || btnContent.inlineButtons.any { r -> r.any { it.url.isNotEmpty() } })) {
+                val openMini = LocalMiniApp.current
+                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (btnContent.miniAppUrl.isNotEmpty()) Surface(
+                        shape = RoundedCornerShape(14.dp), color = fg.copy(alpha = 0.16f),
+                        modifier = Modifier.fillMaxWidth().bounceClick { openMini(sender?.title.orEmpty(), btnContent.miniAppUrl) }
+                    ) { Text("Открыть приложение", Modifier.padding(10.dp), style = MaterialTheme.typography.labelLarge, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+                    btnContent.inlineButtons.flatten().filter { it.url.startsWith("https://") }.forEach { b ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp), color = fg.copy(alpha = 0.16f),
+                            modifier = Modifier.fillMaxWidth().bounceClick { runCatching { uriHandler.openUri(b.url) } }
+                        ) { Text(b.text, Modifier.padding(10.dp), style = MaterialTheme.typography.labelLarge, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+                    }
                 }
             }
             val shown = if (msg.deleted) emptyMap() else msg.reactions.filter { !it.value.startsWith("poll:") }.entries.groupBy({ it.value }, { it.key })

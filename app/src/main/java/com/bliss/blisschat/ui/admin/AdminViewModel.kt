@@ -28,6 +28,13 @@ class AdminViewModel(private val c: AppContainer) : ViewModel() {
 
     fun clearStatus() { _status.value = null }
 
+    fun saveAiKey(key: String, model: String) {
+        viewModelScope.launch {
+            val r = c.ai.saveOfficial(key, model)
+            _status.value = r.fold({ "Ключ ИИ сохранён" }, { "Ошибка: ${it.message}" })
+        }
+    }
+
     fun find(username: String) {
         viewModelScope.launch {
             val u = runCatching { c.repo.findUserByUsername(username) }.getOrNull()

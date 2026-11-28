@@ -322,33 +322,41 @@ class ChatRepository(private val context: Context, val e2ee: E2EE) {
     }
 
     /**
-     * The official @blisschat channel: created by the super admin on his first start, and every registered account is
-     * subscribed to it once (afterwards the user may leave it).
+     * The official @blisschat channel and the official @blisschat_chat group (with the AI "Gemini"): created by the super
+     * admin on his first start; every registered account is subscribed to both once (afterwards the user may leave).
      */
     suspend fun ensureOfficialChannel(user: UserProfile) {
+        ensureOfficial(user, OFFICIAL_CHANNEL, ChatType.CHANNEL, "blisschat", "Официальный канал blisschat: новости и обновления")
+        ensureOfficial(user, OFFICIAL_GROUP, ChatType.GROUP, "blisschat чат", "Общий чат всех пользователей. Напишите «гемини, ...» — ответит ИИ")
+    }
+
+    private suspend fun ensureOfficial(user: UserProfile, id: String, type: ChatType, title: String, about: String) {
         val prefs = context.getSharedPreferences("official", Context.MODE_PRIVATE)
-        if (prefs.getBoolean("joined.${user.uid}", false)) return
-        val ref = chats.document(OFFICIAL_CHANNEL)
+        val flag = "joined.$id.${user.uid}"
+        // (the channel keeps the flag name used by the previous version)
+        val oldFlag = "joined.${user.uid}"
+        if (prefs.getBoolean(flag, false) || (id == OFFICIAL_CHANNEL && prefs.getBoolean(oldFlag, false))) return
+        val ref = chats.document(id)
         val snap = runCatching { ref.get().await() }.getOrNull()
         if (snap == null || !snap.exists()) {
             if (!user.isAdmin) return
             val now = System.currentTimeMillis()
             val batch = db.batch()
-            batch.set(chatNames.document(OFFICIAL_CHANNEL), mapOf("chatId" to OFFICIAL_CHANNEL, "ownerId" to user.uid))
+            batch.set(chatNames.document(id), mapOf("chatId" to id, "ownerId" to user.uid))
             batch.set(ref, mapOf(
-                "type" to ChatType.CHANNEL.name, "name" to "blisschat", "avatarUrl" to "", "ownerId" to user.uid,
-                "username" to OFFICIAL_CHANNEL, "description" to "Официальный канал blisschat: новости и обновления",
+                "type" to type.name, "name" to title, "avatarUrl" to "", "ownerId" to user.uid,
+                "username" to id, "description" to about,
                 "creatorTags" to false, "selfTags" to false, "ladder" to emptyList<Any>(),
                 "members" to listOf(user.uid), "verified" to false,
                 "lastMsgId" to "", "lastSenderId" to "", "lastAt" to now, "readers" to emptyList<String>(),
                 "createdAt" to now, "secret" to false
             ))
-            runCatching { batch.commit().await() }.onSuccess { prefs.edit().putBoolean("joined.${user.uid}", true).apply() }
+            runCatching { batch.commit().await() }.onSuccess { prefs.edit().putBoolean(flag, true).apply() }
             return
         }
         val members = (snap.get("members") as? List<*>).orEmpty()
-        if (user.uid in members) { prefs.edit().putBoolean("joined.${user.uid}", true).apply(); return }
-        joinPublic(OFFICIAL_CHANNEL, user.uid).onSuccess { prefs.edit().putBoolean("joined.${user.uid}", true).apply() }
+        if (user.uid in members) { prefs.edit().putBoolean(flag, true).apply(); return }
+        joinPublic(id, user.uid).onSuccess { prefs.edit().putBoolean(flag, true).apply() }
     }
 
     suspend fun joinPublic(chatId: String, me: String): Result<Unit> = runCatching {
@@ -701,6 +709,7 @@ class ChatRepository(private val context: Context, val e2ee: E2EE) {
 
 /** Turns raw exceptions into readable messages for the UI. */
 const val OFFICIAL_CHANNEL = "blisschat"
+const val OFFICIAL_GROUP = "blisschat_chat"
 private val CHAT_NAME = Regex("^[a-z][a-z0-9_]{4,31}$")
 
 internal fun <T> Result<T>.mapFailure(): Result<T> = fold(

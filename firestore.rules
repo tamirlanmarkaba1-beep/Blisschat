@@ -29,16 +29,20 @@ service cloud.firestore {
         && request.resource.data.get('moderator', false) == false
         // usernames ending in _bot belong to bots (flag bot = true), and only to them
         && (request.resource.data.get('bot', false) == true) == request.resource.data.username.matches('.*_bot')
+        // usernames ending in _ai belong to AI accounts (flag ai = true), and only to them
+        && (request.resource.data.get('ai', false) == true) == request.resource.data.username.matches('.*_ai')
         && request.resource.data.username is string
         && existsAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username))
         && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == uid;
       allow update: if (me() == uid && changed(['displayName', 'bio', 'avatarUrl', 'lastSeen', 'publicKey', 'kid', 'fcmTokens']))
         || (isAdmin() && changed(['verified', 'support', 'moderator']))
         // the owner of a bot may edit its Python code and profile
-        || (signedIn() && resource.data.get('bot', false) == true && resource.data.get('ownerId', '') == me()
-            && changed(['pythonCode', 'displayName', 'bio', 'avatarUrl']));
+        || (signedIn() && (resource.data.get('bot', false) == true || resource.data.get('ai', false) == true)
+            && resource.data.get('ownerId', '') == me()
+            && changed(['pythonCode', 'displayName', 'bio', 'avatarUrl', 'miniAppUrl', 'aiPrompt']));
       // the owner may delete his own bot
-      allow delete: if signedIn() && resource.data.get('bot', false) == true && resource.data.get('ownerId', '') == me();
+      allow delete: if signedIn() && (resource.data.get('bot', false) == true || resource.data.get('ai', false) == true)
+        && resource.data.get('ownerId', '') == me();
 
       // Encrypted key backup (ciphertext only, unlocked by the user's password / recovery code on the device).
       match /backup/{id} {
@@ -63,7 +67,8 @@ service cloud.firestore {
         && request.resource.data.uid == me()
         && name == name.lower()
         && (name != 'blisschat_bot' || (request.auth.token.email == adminEmail() && request.auth.token.email_verified == true))
-        && (name != 'tomatik_dev' || (request.auth.token.email == adminEmail() && request.auth.token.email_verified == true));
+        && (name != 'tomatik_dev' || (request.auth.token.email == adminEmail() && request.auth.token.email_verified == true))
+        && name != 'gemini_ai';
       // Taking over a v1 username: only by the account whose e-mail equals the e-mail of the old,
       // key-less v1 profile that owns the name. Reserved admin name still needs the verified admin e-mail.
       allow update: if signedIn()
@@ -152,8 +157,9 @@ service cloud.firestore {
       match /messages/{msgId} {
         function chat() { return doc('chats/' + chatId).data; }
         // posts of public channels are readable by everybody (channel feed); everything else only by members
-        allow read: if signedIn() && (me() in chat().members
-          || (chat().type == 'CHANNEL' && chat().get('username', '') != '' && chat().get('secret', false) == false));
+        allow read: if signedIn() && me() in chat().members;
+        // (a separate rule, so that it can never break the member rule above)
+        allow read: if signedIn() && chat().type == 'CHANNEL' && chat().get('username', '') != '';
         allow create: if signedIn() && me() in chat().members
           && request.resource.data.senderId == me() && request.resource.data.deleted == false
           // in a channel only the owner publishes
@@ -168,9 +174,9 @@ service cloud.firestore {
     /* -------------------------------------------------------------- media */
     // Encrypted photos / stickers (ciphertext only). Visible to the members of the chat they belong to.
     match /media/{id} {
-      allow read: if signedIn() && (me() in doc('chats/' + resource.data.chatId).data.members
-        || (doc('chats/' + resource.data.chatId).data.type == 'CHANNEL'
-            && doc('chats/' + resource.data.chatId).data.get('username', '') != ''));
+      allow read: if signedIn() && me() in doc('chats/' + resource.data.chatId).data.members;
+      allow read: if signedIn() && doc('chats/' + resource.data.chatId).data.type == 'CHANNEL'
+        && doc('chats/' + resource.data.chatId).data.get('username', '') != '';
       allow create: if signedIn() && request.resource.data.by == me()
         && me() in doc('chats/' + request.resource.data.chatId).data.members;
       allow update: if false;
@@ -229,6 +235,13 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if signedIn() && resource.data.to == me();
       }
+    }
+
+    /* ------------------------------------------------- AI settings (admin) */
+    // config/ai = { key: <Gemini API key of the official AI>, model: <optional model name> }
+    match /config/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
     }
 
     /* ------------------------------------------------------------ reports */

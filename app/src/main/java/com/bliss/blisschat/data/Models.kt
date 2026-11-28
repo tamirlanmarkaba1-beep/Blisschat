@@ -27,9 +27,16 @@ data class UserProfile(
     val createdAt: Long = 0L,
     val bot: Boolean = false,
     val moderator: Boolean = false,
-    val pythonCode: String = ""
+    val pythonCode: String = "",
+    /** AI account (username ends with _ai): answers through the owner's phone using the owner's API key. */
+    val ai: Boolean = false,
+    val aiPrompt: String = "",
+    val ownerId: String = "",
+    /** Mini app (a web page) of a bot, opened inside the messenger. */
+    val miniAppUrl: String = ""
 ) {
     val isBot: Boolean get() = bot || username.endsWith("_bot", ignoreCase = true)
+    val isAi: Boolean get() = ai || username.endsWith("_ai", ignoreCase = true)
     val isAdmin: Boolean get() = username.equals(ADMIN_USERNAME, ignoreCase = true)
     val title: String get() = displayName.ifBlank { username }
     fun online(now: Long = System.currentTimeMillis()) = now - lastSeen < 75_000L
@@ -112,13 +119,17 @@ data class Content(
     val miniAppUrl: String = "",
     val replyToId: String = "",
     /** Text written under a photo / file / voice message. */
-    val caption: String = ""
+    val caption: String = "",
+    /** The message was written by an AI (id) with this display name; the real sender only forwarded it. */
+    val via: String = "",
+    val viaName: String = ""
 ) {
     fun toJson(): String {
         val o = JSONObject()
             .put("k", kind).put("t", text).put("p", path).put("e", key).put("w", w).put("h", h)
             .put("m", miniAppUrl).put("r", replyToId)
         if (caption.isNotEmpty()) o.put("c", caption)
+        if (via.isNotEmpty()) o.put("v", via).put("vn", viaName)
         if (inlineButtons.isNotEmpty()) {
             val arr = JSONArray()
             for (row in inlineButtons) {
@@ -165,7 +176,7 @@ data class Content(
             return Content(
                 o.optString("k", KIND_TEXT), o.optString("t"), o.optString("p"),
                 o.optString("e"), o.optInt("w"), o.optInt("h"),
-                btnsList, o.optString("m"), o.optString("r"), o.optString("c")
+                btnsList, o.optString("m"), o.optString("r"), o.optString("c"), o.optString("v"), o.optString("vn")
             )
         }
     }
@@ -205,7 +216,11 @@ fun DocumentSnapshot.toUserProfile(): UserProfile? {
         createdAt = getLong("createdAt") ?: 0L,
         bot = getBoolean("bot") ?: false,
         moderator = getBoolean("moderator") ?: false,
-        pythonCode = getString("pythonCode").orEmpty()
+        pythonCode = getString("pythonCode").orEmpty(),
+        ai = getBoolean("ai") ?: false,
+        aiPrompt = getString("aiPrompt").orEmpty(),
+        ownerId = getString("ownerId").orEmpty(),
+        miniAppUrl = getString("miniAppUrl").orEmpty()
     )
 }
 

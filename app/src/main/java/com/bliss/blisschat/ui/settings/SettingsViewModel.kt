@@ -43,8 +43,21 @@ class SettingsViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun deleteBot(botUid: String) {
-        viewModelScope.launch { c.bots.deleteBot(botUid) }
+        viewModelScope.launch { c.bots.deleteBot(botUid); c.ai.forget(botUid) }
     }
+
+    fun updateMiniApp(botUid: String, url: String, onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch { onResult(c.bots.updateMiniApp(botUid, url)) }
+    }
+
+    fun updateAi(aiUid: String, name: String, prompt: String, key: String, onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            if (key.isNotBlank()) c.ai.setKey(aiUid, key)
+            onResult(c.bots.updateAi(aiUid, name, prompt))
+        }
+    }
+
+    fun hasAiKey(aiUid: String): Boolean = c.ai.keyOf(aiUid).isNotBlank()
 
     /** People and chats whose notifications are switched off (with readable names). */
     val muted: StateFlow<List<MutedItem>> = c.settings.settings.map { it.muted }.distinctUntilChanged().mapLatest { keys ->

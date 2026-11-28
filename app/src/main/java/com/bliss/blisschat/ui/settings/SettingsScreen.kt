@@ -73,7 +73,7 @@ private fun settingsItems(user: UserProfile?): List<SettingsItem> = buildList {
     add(SettingsItem("основное", "settings/security", Icons.Filled.Shield, "Секретные чаты и ключи", "Резервная копия ключей", 1, "ключ копия восстановить пароль сообщения пропали"))
     add(SettingsItem("дополнения", "settings/plugins", Icons.Filled.Extension, "Плагины", "Настройки плагинов, каталог, свой код", 2, "тема код стиль скрипт javascript"))
     add(SettingsItem("дополнения", "stickers", Icons.Filled.SentimentSatisfied, "Стикеры", "Свои наборы стикеров", 0, "эмодзи паки"))
-    add(SettingsItem("дополнения", "settings/bots", Icons.Filled.SmartToy, "Боты (Python)", "Ваши боты и их код", 1, "бот python скрипт"))
+    add(SettingsItem("дополнения", "settings/bots", Icons.Filled.SmartToy, "Боты и ИИ", "Ваши боты, ИИ, мини-приложения", 1, "бот python скрипт ии gemini мини приложение"))
     add(SettingsItem("дополнения", "settings/guide", Icons.Filled.MenuBook, "Руководство", "Как делать ботов и плагины", 0, "бот плагин botkeep инструкция помощь api"))
     if (user?.moderator == true || user?.isAdmin == true)
         add(SettingsItem("дополнения", "moderation", Icons.Filled.Verified, "Модерация плагинов", "Заявки на проверку", 2))

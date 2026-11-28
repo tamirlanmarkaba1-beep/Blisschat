@@ -53,6 +53,17 @@ class CreateViewModel(private val c: AppContainer) : ViewModel() {
         viewModelScope.launch { onResult(c.repo.joinPublic(chat.id, m.uid)) }
     }
 
+    /** Creates an AI profile and keeps its API key only on this phone. */
+    fun createAi(name: String, username: String, apiKey: String, prompt: String, onResult: (Result<String>) -> Unit) {
+        val m = me.value ?: return
+        if (apiKey.isBlank()) { onResult(Result.failure(IllegalArgumentException("Вставьте API-ключ Gemini"))); return }
+        viewModelScope.launch {
+            val r = c.bots.createAi(m, name, username, prompt)
+            r.onSuccess { uid -> c.ai.setKey(uid, apiKey) }
+            onResult(r)
+        }
+    }
+
     /** @return the bot token */
     fun createBot(name: String, username: String, pythonCode: String, onResult: (Result<String>) -> Unit) {
         val m = me.value ?: return
